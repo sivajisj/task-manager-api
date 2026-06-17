@@ -7,7 +7,7 @@ use crate::{
     errors::{AppError, AppResult},
     models::{
         AssignTasksRequest, AssignTasksResponse, CacheMeta, Claims, CreateTaskRequest,
-        ErrorResponse, MyTasksResponse, MyTasksUser, Task, TaskPriority, TaskPublic, TaskStatus,
+        MyTasksResponse, MyTasksUser, TaskPriority, TaskPublic, TaskStatus,
         TaskSummary, UserRole,
     },
     AppState,
@@ -21,9 +21,9 @@ use crate::{
     request_body(content = CreateTaskRequest, description = "New task details"),
     responses(
         (status = 200, description = "Task created successfully", body = TaskPublic),
-        (status = 401, description = "Missing or invalid JWT", body = ErrorResponse),
-        (status = 403, description = "Forbidden — admin role required", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid JWT", body = crate::models::ErrorResponse),
+        (status = 403, description = "Forbidden — admin role required", body = crate::models::ErrorResponse),
+        (status = 500, description = "Internal server error", body = crate::models::ErrorResponse),
     )
 )]
 pub async fn create_task(
@@ -78,10 +78,10 @@ pub async fn create_task(
     request_body(content = AssignTasksRequest, description = "Task IDs and the email of the staff user to assign them to"),
     responses(
         (status = 200, description = "Tasks assigned successfully", body = AssignTasksResponse),
-        (status = 401, description = "Missing or invalid JWT", body = ErrorResponse),
-        (status = 403, description = "Forbidden — admin role required", body = ErrorResponse),
-        (status = 404, description = "Target user not found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid JWT", body = crate::models::ErrorResponse),
+        (status = 403, description = "Forbidden — admin role required", body = crate::models::ErrorResponse),
+        (status = 404, description = "Target user not found", body = crate::models::ErrorResponse),
+        (status = 500, description = "Internal server error", body = crate::models::ErrorResponse),
     )
 )]
 pub async fn assign_tasks(
@@ -153,8 +153,8 @@ pub async fn assign_tasks(
     security(("bearer_auth" = [])),
     responses(
         (status = 200, description = "Tasks assigned to the authenticated user (served from cache when hit=true)", body = MyTasksResponse),
-        (status = 401, description = "Missing or invalid JWT", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid JWT", body = crate::models::ErrorResponse),
+        (status = 500, description = "Internal server error", body = crate::models::ErrorResponse),
     )
 )]
 pub async fn view_my_tasks(

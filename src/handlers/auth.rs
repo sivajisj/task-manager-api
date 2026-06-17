@@ -5,8 +5,8 @@ use uuid::Uuid;
 use crate::{
     errors::{AppError, AppResult},
     models::{
-        AuthTokenResponse, ErrorResponse, LoginChallengeResponse, LoginRequest, UserPublic,
-        UserRole, Verify2faRequest,
+        AuthTokenResponse, LoginChallengeResponse, LoginRequest, UserPublic, UserRole,
+        Verify2faRequest,
     },
     services::{generate_jwt, generate_otp, hash_code, verify_code, verify_password},
     AppState,
@@ -19,8 +19,8 @@ use crate::{
     request_body(content = LoginRequest, description = "User credentials"),
     responses(
         (status = 200, description = "Login challenge initiated — OTP sent to email", body = LoginChallengeResponse),
-        (status = 401, description = "Invalid email or password", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse),
+        (status = 401, description = "Invalid email or password", body = crate::models::ErrorResponse),
+        (status = 500, description = "Internal server error", body = crate::models::ErrorResponse),
     )
 )]
 pub async fn login(
@@ -100,8 +100,8 @@ pub async fn login(
     request_body(content = Verify2faRequest, description = "Challenge ID and 6-digit OTP"),
     responses(
         (status = 200, description = "Authentication successful — JWT bearer token returned", body = AuthTokenResponse),
-        (status = 400, description = "Invalid, expired, or already-used OTP", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse),
+        (status = 400, description = "Invalid, expired, or already-used OTP", body = crate::models::ErrorResponse),
+        (status = 500, description = "Internal server error", body = crate::models::ErrorResponse),
     )
 )]
 pub async fn verify_2fa(

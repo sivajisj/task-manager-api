@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::{
     errors::{AppError, AppResult},
-    models::{ErrorResponse, SeedResponse, UserPublic, UserRole},
+    models::{SeedResponse, UserPublic, UserRole},
     services::hash_password,
     AppState,
 };
@@ -15,8 +15,8 @@ use crate::{
     tag = "seed",
     responses(
         (status = 200, description = "Users seeded — admin@example.com / Admin@1234, jamesbond@example.com / Bond@1234", body = SeedResponse),
-        (status = 400, description = "Users already seeded", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse),
+        (status = 400, description = "Users already seeded", body = crate::models::ErrorResponse),
+        (status = 500, description = "Internal server error", body = crate::models::ErrorResponse),
     )
 )]
 pub async fn seed_users(State(state): State<AppState>) -> AppResult<Json<SeedResponse>> {

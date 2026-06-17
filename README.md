@@ -1,6 +1,6 @@
 # Task Manager API
 
-A production-structured Rust backend API built with Axum, SQLx, and PostgreSQL. Implements email-based two-factor authentication, role-based access control, task management with assignment, and per-user in-memory caching.
+A production-structured Rust backend API built with Axum, SQLx, and PostgreSQL. Implements email-based two-factor authentication, role-based access control (RBAC), task management with assignment, per-user in-memory caching, and interactive Swagger UI documentation.
 
 ---
 
@@ -13,6 +13,7 @@ A production-structured Rust backend API built with Axum, SQLx, and PostgreSQL. 
 - [Database Setup](#database-setup)
 - [Environment Configuration](#environment-configuration)
 - [Running the Server](#running-the-server)
+- [Swagger UI](#swagger-ui)
 - [API Reference](#api-reference)
 - [Full Validation Flow](#full-validation-flow)
 - [Final Validation Response](#final-validation-response)
@@ -38,6 +39,7 @@ A production-structured Rust backend API built with Axum, SQLx, and PostgreSQL. 
 | 2FA Code Hashing | SHA-256 (sha2 crate) |
 | Caching | In-memory DashMap |
 | Serialization | Serde + serde_json |
+| API Docs | utoipa 4 + utoipa-swagger-ui 7 |
 | Logging | tracing + tracing-subscriber |
 | Error Handling | thiserror + anyhow |
 
@@ -47,7 +49,9 @@ A production-structured Rust backend API built with Axum, SQLx, and PostgreSQL. 
 
 ```
 src/
-├── main.rs              # Entry point, AppState, server boot
+├── lib.rs               # Crate root — AppState, build_app(), run()
+├── main.rs              # Binary entry point (calls lib::run)
+├── openapi.rs           # OpenAPI 3.0 spec (utoipa derive)
 ├── config/              # Environment config loader
 ├── db/                  # PostgreSQL connection pool
 ├── models/              # All entities and request/response DTOs
@@ -57,7 +61,7 @@ src/
 │   ├── seed.rs          # Seed users for development
 │   └── dev.rs           # Dev-only email log viewer
 ├── middleware/          # JWT auth middleware
-├── routes/              # Axum router wiring
+├── routes/              # Axum router wiring + Swagger UI mount
 ├── services/            # Argon2, JWT, OTP, SHA-256 utilities
 ├── cache/               # In-memory DashMap cache
 └── errors/              # AppError enum + IntoResponse impl
@@ -151,13 +155,6 @@ psql -U postgres -h localhost -p 5433 -d task_manager -c "SELECT 1;"
 # Password: password
 ```
 
-Expected output:
-```
- ?column?
-----------
-        1
-```
-
 ### docker-compose.yml reference
 
 ```yaml
@@ -180,7 +177,7 @@ volumes:
   task_manager_data:
 ```
 
-> Note: Port `5433` is used on the host to avoid conflicts with any local PostgreSQL on `5432`.
+> Port `5433` is used on the host to avoid conflicts with any local PostgreSQL on `5432`.
 
 ---
 
@@ -230,7 +227,37 @@ Expected output:
 >> Running migrations...
 >> Migrations complete.
 >> Server running at http://0.0.0.0:8080
+>> Swagger UI: http://0.0.0.0:8080/swagger-ui/
 ```
+
+---
+
+## Swagger UI
+
+Once the server is running, open your browser at:
+
+```
+http://localhost:8080/swagger-ui/
+```
+
+The interactive UI lets you explore and execute every endpoint without curl or Postman.
+
+The raw OpenAPI 3.0 JSON spec is available at:
+
+```
+http://localhost:8080/api-docs/openapi.json
+```
+
+### Using the Swagger UI for the full auth flow
+
+The protected endpoints require a JWT. Follow these steps directly in the UI:
+
+1. **`POST /seed/users`** — run it once to create the default accounts
+2. **`POST /auth/login`** — enter credentials, copy the `login_challenge_id` from the response
+3. **`GET /dev/email-logs/latest`** — copy the 6-digit code from the `body` field
+4. **`POST /auth/verify-2fa`** — paste the challenge ID and code, copy the `access_token`
+5. Click **Authorize** (lock icon, top right) → paste `<your_token>` (without `Bearer `) → **Authorize**
+6. All subsequent requests in the UI will include the JWT automatically
 
 ---
 
@@ -238,13 +265,15 @@ Expected output:
 
 | Method | Endpoint | Auth Required | Role | Purpose |
 |--------|----------|---------------|------|---------|
-| POST | `/seed/users` | No | - | Create Admin and James Bond |
-| POST | `/auth/login` | No | - | Validate credentials, trigger 2FA |
-| GET | `/dev/email-logs/latest` | No | - | View latest verification code (dev only) |
-| POST | `/auth/verify-2fa` | No | - | Verify code, receive JWT |
+| POST | `/seed/users` | No | — | Create Admin and James Bond |
+| POST | `/auth/login` | No | — | Validate credentials, trigger 2FA |
+| GET | `/dev/email-logs/latest` | No | — | View latest OTP code (dev only) |
+| POST | `/auth/verify-2fa` | No | — | Verify OTP, receive JWT |
 | POST | `/tasks` | Yes | Admin | Create a task |
 | POST | `/tasks/assign` | Yes | Admin | Assign tasks to a user |
 | GET | `/tasks/view-my-tasks` | Yes | Any | View tasks assigned to me |
+| GET | `/swagger-ui/` | No | — | Interactive API documentation |
+| GET | `/api-docs/openapi.json` | No | — | Raw OpenAPI 3.0 spec |
 
 ---
 
@@ -279,7 +308,7 @@ Credentials created:
 
 ---
 
-### Step 2: Login as Admin (no JWT returned)
+### Step 2: Login as Admin
 
 ```bash
 curl -s -X POST http://localhost:8080/auth/login \
@@ -352,30 +381,12 @@ ADMIN_TOKEN="eyJ..."
 ### Step 5: Create 5 tasks as Admin
 
 ```bash
-curl -s -X POST http://localhost:8080/tasks \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Task One", "priority": "high"}' | jq
-
-curl -s -X POST http://localhost:8080/tasks \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Task Two", "priority": "high"}' | jq
-
-curl -s -X POST http://localhost:8080/tasks \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Task Three", "priority": "medium"}' | jq
-
-curl -s -X POST http://localhost:8080/tasks \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Task Four", "priority": "medium"}' | jq
-
-curl -s -X POST http://localhost:8080/tasks \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Task Five", "priority": "low"}' | jq
+for title in "Task One" "Task Two" "Task Three" "Task Four" "Task Five"; do
+  curl -s -X POST http://localhost:8080/tasks \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"title\": \"$title\", \"priority\": \"high\"}" | jq .
+done
 ```
 
 > Note the `id` values from the first 3 responses for the next step.
@@ -401,47 +412,38 @@ curl -s -X POST http://localhost:8080/tasks/assign \
 Expected:
 ```json
 {
+  "message": "Successfully assigned 3 task(s) to jamesbond@example.com",
   "assigned_count": 3,
-  "assigned_to": "jamesbond@example.com",
-  "message": "Successfully assigned 3 task(s) to jamesbond@example.com"
+  "assigned_to": "jamesbond@example.com"
 }
 ```
 
 ---
 
-### Step 7: Login as James Bond
+### Step 7: Login as James Bond and get his JWT
 
 ```bash
+# Login
 curl -s -X POST http://localhost:8080/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email": "jamesbond@example.com", "password": "Bond@1234"}' | jq
-```
 
-Save the `login_challenge_id`.
-
----
-
-### Step 8: Get James Bond's code and verify
-
-```bash
+# Get OTP
 curl -s http://localhost:8080/dev/email-logs/latest | jq
 
+# Verify and get token
 curl -s -X POST http://localhost:8080/auth/verify-2fa \
   -H "Content-Type: application/json" \
-  -d '{
-    "login_challenge_id": "<challenge_id>",
-    "code": "<6_digit_code>"
-  }' | jq
+  -d '{"login_challenge_id": "<challenge_id>", "code": "<code>"}' | jq
 ```
 
-Save the token:
 ```bash
 BOND_TOKEN="eyJ..."
 ```
 
 ---
 
-### Step 9: James Bond tries to create a task — must return 403
+### Step 8: James Bond tries to create a task — must return 403
 
 ```bash
 curl -s -X POST http://localhost:8080/tasks \
@@ -452,16 +454,14 @@ curl -s -X POST http://localhost:8080/tasks \
 
 Expected:
 ```json
-{
-  "error": "Only admin users can create tasks"
-}
+{ "error": "Only admin users can create tasks" }
 ```
 
 > HTTP status: `403 Forbidden`
 
 ---
 
-### Step 10: View James Bond's tasks — cache.hit = false
+### Step 9: View James Bond's tasks — cache.hit = false
 
 ```bash
 curl -s http://localhost:8080/tasks/view-my-tasks \
@@ -472,7 +472,7 @@ Expected: 3 tasks, `"cache": { "hit": false }`
 
 ---
 
-### Step 11: Call again — cache.hit = true
+### Step 10: Call again — cache.hit = true
 
 ```bash
 curl -s http://localhost:8080/tasks/view-my-tasks \
@@ -529,17 +529,10 @@ Second call (`cache.hit = true`):
 
 ```json
 {
-  "user": {
-    "email": "jamesbond@example.com",
-    "role": "staff"
-  },
+  "user": { "email": "jamesbond@example.com", "role": "staff" },
   "tasks": [...],
-  "summary": {
-    "total_assigned_tasks": 3
-  },
-  "cache": {
-    "hit": true
-  }
+  "summary": { "total_assigned_tasks": 3 },
+  "cache": { "hit": true }
 }
 ```
 
@@ -554,11 +547,11 @@ Redis is not used. An in-memory `DashMap`-based cache is used instead.
 | Cache type | In-memory DashMap |
 | Cache key | `tasks:user:{user_id}` |
 | TTL | 5 minutes |
-| Invalidation | On task assignment or update |
+| Invalidation | On task assignment |
 | First request | Loads from DB, `cache.hit = false` |
-| Second request | Served from cache, `cache.hit = true` |
+| Subsequent requests | Served from cache, `cache.hit = true` |
 
-**Limitation**: Cache is process-local. In a horizontally scaled deployment, replace DashMap with Redis using the `redis` crate.
+**Limitation:** Cache is process-local. In a horizontally scaled deployment, replace DashMap with Redis using the `redis` crate.
 
 ---
 
@@ -591,8 +584,12 @@ task-manager-api/
 │   ├── 20240101000002_create_tasks.sql
 │   ├── 20240101000003_create_login_challenges.sql
 │   └── 20240101000004_create_email_logs.sql
+├── tests/
+│   └── integration_tests.rs    # Integration test suite
 └── src/
-    ├── main.rs
+    ├── lib.rs                   # Crate root — AppState, build_app(), run()
+    ├── main.rs                  # Binary entry point
+    ├── openapi.rs               # OpenAPI 3.0 spec (utoipa derive)
     ├── config/mod.rs
     ├── db/mod.rs
     ├── errors/mod.rs
@@ -600,7 +597,7 @@ task-manager-api/
     ├── cache/mod.rs
     ├── services/mod.rs
     ├── middleware/mod.rs
-    ├── routes/mod.rs
+    ├── routes/mod.rs            # Router + Swagger UI mount
     └── handlers/
         ├── mod.rs
         ├── auth.rs
@@ -613,9 +610,48 @@ task-manager-api/
 
 ## Running Tests
 
+The integration test suite exercises every endpoint against a real PostgreSQL database.
+
+### Prerequisites
+
+Make sure the database is running and `DATABASE_URL` is set in your `.env`:
+
 ```bash
-cargo test
+docker compose up -d
 ```
+
+### Run all tests
+
+```bash
+# Tests share the database — run sequentially to avoid race conditions
+cargo test -- --test-threads=1 --nocapture
+```
+
+### What the tests cover
+
+| Test | Description |
+|------|-------------|
+| `test_seed_users_success` | Seeding creates admin + staff accounts |
+| `test_seed_users_already_seeded` | Second seed attempt returns 400 |
+| `test_login_user_not_found` | Unknown email returns 401 |
+| `test_login_wrong_password` | Wrong password returns 401 |
+| `test_login_success` | Valid credentials return a challenge ID |
+| `test_verify_2fa_invalid_challenge_id` | Fake UUID returns 400 |
+| `test_verify_2fa_invalid_code` | Wrong OTP returns 400 |
+| `test_verify_2fa_code_already_used` | Re-using a code returns 400 |
+| `test_full_auth_flow` | Login → OTP → token end-to-end |
+| `test_dev_email_log_empty` | Returns 404 on empty DB |
+| `test_dev_email_log_after_login` | Returns OTP email after login |
+| `test_create_task_no_auth` | Missing token returns 401 |
+| `test_create_task_invalid_token` | Bad JWT returns 401 |
+| `test_create_task_staff_forbidden` | Staff role returns 403 |
+| `test_create_task_admin_success` | Admin creates task successfully |
+| `test_assign_tasks_admin_success` | Admin assigns tasks to staff |
+| `test_assign_tasks_user_not_found` | Unknown assignee email returns 404 |
+| `test_assign_tasks_staff_forbidden` | Staff role returns 403 |
+| `test_view_my_tasks_no_auth` | Missing token returns 401 |
+| `test_view_my_tasks_success` | Returns assigned tasks with correct data |
+| `test_view_my_tasks_cache_hit` | Second call returns `cache.hit = true` |
 
 ---
 
@@ -642,3 +678,7 @@ cargo test
 **Port 5432 already in use**
 - Stop local Postgres: `sudo systemctl stop postgresql`
 - Or change docker-compose port to `5433:5432` and update `.env`
+
+**Swagger UI shows no endpoints**
+- Make sure the server compiled successfully: `cargo build`
+- Check `http://localhost:8080/api-docs/openapi.json` returns valid JSON

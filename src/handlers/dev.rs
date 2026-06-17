@@ -4,7 +4,7 @@ use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::{errors::AppResult, models::ErrorResponse, AppState};
+use crate::{errors::AppResult, AppState};
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct EmailLogResponse {
@@ -22,8 +22,8 @@ pub struct EmailLogResponse {
     tag = "dev",
     responses(
         (status = 200, description = "Most recent email log entry (use body field to extract the OTP)", body = EmailLogResponse),
-        (status = 404, description = "No email logs found", body = ErrorResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse),
+        (status = 404, description = "No email logs found", body = crate::models::ErrorResponse),
+        (status = 500, description = "Internal server error", body = crate::models::ErrorResponse),
     )
 )]
 pub async fn latest_email_log(
