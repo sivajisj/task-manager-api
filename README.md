@@ -279,6 +279,10 @@ The protected endpoints require a JWT. Follow these steps directly in the UI:
 
 ## Full Validation Flow
 
+The diagram below shows the complete 11-step request flow from seeding through cache validation:
+
+![Task Manager API Request Flow](assets/request_flow.png)
+
 Follow these steps exactly to validate the complete workflow.
 
 ### Step 1: Seed users
@@ -579,6 +583,8 @@ task-manager-api/
 ├── .gitignore
 ├── README.md
 ├── AI_USAGE.md
+├── assets/
+│   └── request_flow.png         # API request flow diagram
 ├── migrations/
 │   ├── 20240101000001_create_users.sql
 │   ├── 20240101000002_create_tasks.sql
