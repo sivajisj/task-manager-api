@@ -4,15 +4,24 @@ use uuid::Uuid;
 
 use crate::{
     errors::{AppError, AppResult},
-    models::{SeedResponse, UserPublic, UserRole},
-    services::{hash_password},
+    models::{ErrorResponse, SeedResponse, UserPublic, UserRole},
+    services::hash_password,
     AppState,
 };
 
+#[utoipa::path(
+    post,
+    path = "/seed/users",
+    tag = "seed",
+    responses(
+        (status = 200, description = "Users seeded — admin@example.com / Admin@1234, jamesbond@example.com / Bond@1234", body = SeedResponse),
+        (status = 400, description = "Users already seeded", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
+    )
+)]
 pub async fn seed_users(State(state): State<AppState>) -> AppResult<Json<SeedResponse>> {
     let now = Utc::now();
 
-    // Check if already seeded
     let existing: Option<(Uuid,)> =
         sqlx::query_as("SELECT id FROM users WHERE email = $1 LIMIT 1")
             .bind("admin@example.com")
@@ -63,7 +72,9 @@ pub async fn seed_users(State(state): State<AppState>) -> AppResult<Json<SeedRes
     .execute(&state.db)
     .await?;
 
-    tracing::info!("Seeded Admin (admin@example.com / Admin@1234) and James Bond (jamesbond@example.com / Bond@1234)");
+    tracing::info!(
+        "Seeded Admin (admin@example.com / Admin@1234) and James Bond (jamesbond@example.com / Bond@1234)"
+    );
 
     Ok(Json(SeedResponse {
         message: "Users seeded successfully".to_string(),

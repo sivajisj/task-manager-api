@@ -5,18 +5,28 @@ use uuid::Uuid;
 use crate::{
     errors::{AppError, AppResult},
     models::{
-        AuthTokenResponse, LoginChallengeResponse, LoginRequest, UserPublic, UserRole,
-        Verify2faRequest,
+        AuthTokenResponse, ErrorResponse, LoginChallengeResponse, LoginRequest, UserPublic,
+        UserRole, Verify2faRequest,
     },
     services::{generate_jwt, generate_otp, hash_code, verify_code, verify_password},
     AppState,
 };
 
+#[utoipa::path(
+    post,
+    path = "/auth/login",
+    tag = "auth",
+    request_body(content = LoginRequest, description = "User credentials"),
+    responses(
+        (status = 200, description = "Login challenge initiated — OTP sent to email", body = LoginChallengeResponse),
+        (status = 401, description = "Invalid email or password", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
+    )
+)]
 pub async fn login(
     State(state): State<AppState>,
     Json(body): Json<LoginRequest>,
 ) -> AppResult<Json<LoginChallengeResponse>> {
-    // Fetch user
     let user = sqlx::query_as::<_, (Uuid, String, String, UserRole)>(
         "SELECT id, email, hashed_password, role FROM users WHERE email = $1",
     )
@@ -27,20 +37,16 @@ pub async fn login(
 
     let (user_id, _email, hashed_password, _role) = user;
 
-    // Verify password
     if !verify_password(&body.password, &hashed_password)? {
         return Err(AppError::Unauthorized("Invalid email or password".to_string()));
     }
 
-    // Generate OTP
     let otp = generate_otp();
     let otp_hash = hash_code(&otp);
     let challenge_id = Uuid::new_v4();
     let now = Utc::now();
-    let expires_at =
-        now + chrono::Duration::minutes(state.config.challenge_expiry_minutes);
+    let expires_at = now + chrono::Duration::minutes(state.config.challenge_expiry_minutes);
 
-    // Save challenge
     sqlx::query(
         r#"
         INSERT INTO login_challenges (id, user_id, code_hash, expires_at, used, created_at)
@@ -55,7 +61,6 @@ pub async fn login(
     .execute(&state.db)
     .await?;
 
-    // Log email (dev mode)
     let email_body = format!(
         "Your verification code is: {}. It expires in {} minutes.",
         otp, state.config.challenge_expiry_minutes
@@ -88,13 +93,23 @@ pub async fn login(
     }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/verify-2fa",
+    tag = "auth",
+    request_body(content = Verify2faRequest, description = "Challenge ID and 6-digit OTP"),
+    responses(
+        (status = 200, description = "Authentication successful — JWT bearer token returned", body = AuthTokenResponse),
+        (status = 400, description = "Invalid, expired, or already-used OTP", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
+    )
+)]
 pub async fn verify_2fa(
     State(state): State<AppState>,
     Json(body): Json<Verify2faRequest>,
 ) -> AppResult<Json<AuthTokenResponse>> {
     let now = Utc::now();
 
-    // Fetch challenge
     let challenge = sqlx::query_as::<_, (Uuid, Uuid, String, chrono::DateTime<Utc>, bool)>(
         "SELECT id, user_id, code_hash, expires_at, used FROM login_challenges WHERE id = $1",
     )
@@ -106,24 +121,28 @@ pub async fn verify_2fa(
     let (challenge_id, user_id, code_hash, expires_at, used) = challenge;
 
     if used {
-        return Err(AppError::BadRequest("This code has already been used".to_string()));
+        return Err(AppError::BadRequest(
+            "This code has already been used".to_string(),
+        ));
     }
 
     if now > expires_at {
-        return Err(AppError::BadRequest("Verification code has expired".to_string()));
+        return Err(AppError::BadRequest(
+            "Verification code has expired".to_string(),
+        ));
     }
 
     if !verify_code(&body.code, &code_hash) {
-        return Err(AppError::BadRequest("Invalid verification code".to_string()));
+        return Err(AppError::BadRequest(
+            "Invalid verification code".to_string(),
+        ));
     }
 
-    // Mark challenge as used
     sqlx::query("UPDATE login_challenges SET used = true WHERE id = $1")
         .bind(challenge_id)
         .execute(&state.db)
         .await?;
 
-    // Fetch user
     let user = sqlx::query_as::<_, (String, String, UserRole, String)>(
         "SELECT full_name, email, role, id::text FROM users WHERE id = $1",
     )

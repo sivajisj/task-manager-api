@@ -6,18 +6,31 @@ use crate::{
     cache::task_cache_key,
     errors::{AppError, AppResult},
     models::{
-        AssignTasksRequest, CacheMeta, Claims, CreateTaskRequest, MyTasksResponse, MyTasksUser,
-        Task, TaskPriority, TaskPublic, TaskStatus, TaskSummary, UserRole,
+        AssignTasksRequest, AssignTasksResponse, CacheMeta, Claims, CreateTaskRequest,
+        ErrorResponse, MyTasksResponse, MyTasksUser, Task, TaskPriority, TaskPublic, TaskStatus,
+        TaskSummary, UserRole,
     },
     AppState,
 };
 
+#[utoipa::path(
+    post,
+    path = "/tasks",
+    tag = "tasks",
+    security(("bearer_auth" = [])),
+    request_body(content = CreateTaskRequest, description = "New task details"),
+    responses(
+        (status = 200, description = "Task created successfully", body = TaskPublic),
+        (status = 401, description = "Missing or invalid JWT", body = ErrorResponse),
+        (status = 403, description = "Forbidden — admin role required", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
+    )
+)]
 pub async fn create_task(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Json(body): Json<CreateTaskRequest>,
 ) -> AppResult<Json<TaskPublic>> {
-    // Only Admin can create tasks
     if claims.role != "admin" {
         return Err(AppError::Forbidden(
             "Only admin users can create tasks".to_string(),
@@ -57,19 +70,31 @@ pub async fn create_task(
     }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/tasks/assign",
+    tag = "tasks",
+    security(("bearer_auth" = [])),
+    request_body(content = AssignTasksRequest, description = "Task IDs and the email of the staff user to assign them to"),
+    responses(
+        (status = 200, description = "Tasks assigned successfully", body = AssignTasksResponse),
+        (status = 401, description = "Missing or invalid JWT", body = ErrorResponse),
+        (status = 403, description = "Forbidden — admin role required", body = ErrorResponse),
+        (status = 404, description = "Target user not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
+    )
+)]
 pub async fn assign_tasks(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
     Json(body): Json<AssignTasksRequest>,
-) -> AppResult<Json<serde_json::Value>> {
-    // Only Admin can assign tasks
+) -> AppResult<Json<AssignTasksResponse>> {
     if claims.role != "admin" {
         return Err(AppError::Forbidden(
             "Only admin users can assign tasks".to_string(),
         ));
     }
 
-    // Find target user
     let target = sqlx::query_as::<_, (Uuid, String, UserRole)>(
         "SELECT id, email, role FROM users WHERE email = $1",
     )
@@ -80,7 +105,6 @@ pub async fn assign_tasks(
 
     let (target_user_id, target_email, _target_role) = target;
     let now = Utc::now();
-
     let mut assigned_count = 0usize;
 
     for task_id in &body.task_ids {
@@ -102,7 +126,6 @@ pub async fn assign_tasks(
         }
     }
 
-    // Invalidate task cache for the assigned user
     let cache_key = task_cache_key(&target_user_id.to_string());
     state.cache.invalidate(&cache_key);
 
@@ -113,13 +136,27 @@ pub async fn assign_tasks(
         target_user_id
     );
 
-    Ok(Json(serde_json::json!({
-        "message": format!("Successfully assigned {} task(s) to {}", assigned_count, target_email),
-        "assigned_count": assigned_count,
-        "assigned_to": target_email,
-    })))
+    Ok(Json(AssignTasksResponse {
+        message: format!(
+            "Successfully assigned {} task(s) to {}",
+            assigned_count, target_email
+        ),
+        assigned_count,
+        assigned_to: target_email,
+    }))
 }
 
+#[utoipa::path(
+    get,
+    path = "/tasks/view-my-tasks",
+    tag = "tasks",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "Tasks assigned to the authenticated user (served from cache when hit=true)", body = MyTasksResponse),
+        (status = 401, description = "Missing or invalid JWT", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
+    )
+)]
 pub async fn view_my_tasks(
     State(state): State<AppState>,
     Extension(claims): Extension<Claims>,
@@ -129,7 +166,6 @@ pub async fn view_my_tasks(
 
     let cache_key = task_cache_key(&user_id.to_string());
 
-    // Try cache first
     if let Some(cached) = state.cache.get(&cache_key) {
         if let Ok(mut response) = serde_json::from_value::<MyTasksResponse>(cached) {
             response.cache.hit = true;
@@ -137,7 +173,6 @@ pub async fn view_my_tasks(
         }
     }
 
-    // Fetch user details
     let user_row = sqlx::query_as::<_, (String, UserRole)>(
         "SELECT email, role FROM users WHERE id = $1",
     )
@@ -147,7 +182,6 @@ pub async fn view_my_tasks(
 
     let (user_email, user_role) = user_row;
 
-    // Fetch assigned tasks with assignee email
     let rows = sqlx::query_as::<_, (Uuid, String, TaskStatus, TaskPriority, Option<String>)>(
         r#"
         SELECT t.id, t.title, t.status, t.priority, u.email as assigned_to_email
@@ -186,9 +220,8 @@ pub async fn view_my_tasks(
         cache: CacheMeta { hit: false },
     };
 
-    // Store in cache (serialize with hit=false, when served from cache we flip to true)
     if let Ok(val) = serde_json::to_value(&response) {
-        state.cache.set(cache_key, val, 300); // 5 min TTL
+        state.cache.set(cache_key, val, 300);
     }
 
     Ok(Json(response))
